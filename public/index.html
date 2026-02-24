@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sensor Controller</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    body { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: sans-serif; background: #222; color: white;}
+    button { padding: 20px 40px; font-size: 24px; border-radius: 10px; background: #007bff; color: white; border: none; cursor: pointer; }
+    #status { margin-top: 20px; font-size: 18px; }
+  </style>
+</head>
+<body>
+  <button id="startButton">START</button>
+  <div id="status">待機中...</div>
+
+  <script>
+    const socket = io(); // サーバーに接続
+    // ランダムなクライアントIDを生成（Max側で識別するため）
+    const clientId = 'client_' + Math.random().toString(36).substr(2, 5); 
+    
+    let currentSensorData = { alpha: 0, beta: 0, gamma: 0 };
+    let isSending = false;
+
+    document.getElementById('startButton').addEventListener('click', async () => {
+      // iOS 13+ のためのセンサー許可リクエスト
+      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        try {
+          const permissionState = await DeviceOrientationEvent.requestPermission();
+          if (permissionState === 'granted') {
+            startSensing();
+          } else {
+            alert('センサーの利用が許可されませんでした。');
+          }
+        } catch (error) {
+          console.error(error);
+        }
+      } else {
+        // Android等、許可が不要な場合
+        startSensing();
+      }
+    });
+
+    function startSensing() {
+      document.getElementById('startButton').style.display = 'none';
+      document.getElementById('status').innerText = '送信中... ID: ' + clientId;
+      isSending = true;
+
+      // センサーの値が更新されたら変数に保存するだけ（ここではまだ送らない）
+      window.addEventListener('deviceorientation', (event) => {
+        currentSensorData.alpha = event.alpha || 0;
+        currentSensorData.beta = event.beta || 0;
+        currentSensorData.gamma = event.gamma || 0;
+      });
+
+      // 負荷対策: 33ミリ秒に1回（約30fps）のペースで最新の値を送信する
+      setInterval(() => {
+        if (isSending) {
+          socket.emit('sensor-data', {
+            id: clientId,
+            alpha: currentSensorData.alpha,
+            beta: currentSensorData.beta,
+            gamma: currentSensorData.gamma
+          });
+        }
+      }, 33);
+    }
+  </script>
+</body>
+</html>
