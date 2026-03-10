@@ -7,15 +7,20 @@
   <script src="/socket.io/socket.io.js"></script>
   <style>
     /* --- 誤操作防止の強力なロック設定 --- */
+    *, *::before, *::after {
+      touch-action: none; /* すべての要素でブラウザの標準タッチ操作を禁止 */
+    }
+    
     html, body {
       overscroll-behavior: none;
-      touch-action: none;
       user-select: none;
       -webkit-user-select: none;
+      -webkit-touch-callout: none; /* iOSの長押しメニュー禁止 */
+      overflow: hidden;            /* スクロールを完全に禁止 */
       
       /* --- 暗闇用カラー設定 --- */
-      background-color: #000000; /* 真っ黒な背景 */
-      color: #ff0000;            /* 天体観測アプリ風のピュアレッド */
+      background-color: #000000;
+      color: #ff0000;
     }
     
     body { 
@@ -29,68 +34,73 @@
     }
 
     /* --- 待機中UI --- */
+    #setupScreen {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      opacity: 0.4; /* 【変更】最初のページ全体を暗くしました */
+    }
+
     #instruction {
       margin-bottom: 40px;
-      font-size: 18px;
+      font-size: 16px;
       text-align: center;
       line-height: 1.8;
       padding: 0 20px;
+      letter-spacing: 1px;
     }
 
     button { 
-      padding: 15px 50px; 
-      font-size: 24px; 
-      border-radius: 8px; 
-      background: transparent;   /* 背景を透明に */
+      padding: 12px 40px; 
+      font-size: 20px; 
+      border-radius: 4px; 
+      background: transparent;
       color: #ff0000; 
-      border: 2px solid #ff0000; /* 赤い線のフチドリ */
+      border: 1px solid #ff0000; /* 【変更】枠線を細くして主張を抑えました */
       cursor: pointer; 
       letter-spacing: 2px;
     }
 
-    /* --- 実行中UI（最初は隠しておく） --- */
+    /* --- 実行中UI --- */
     #activeScreen {
       display: none;
       flex-direction: column;
       align-items: center;
+      opacity: 0.4; /* 【変更】実行中も暗く保つ */
     }
 
-    /* ポインター感を演出するシンプルな照準器 */
-    .reticle {
-      width: 50px;
-      height: 50px;
-      border: 1px solid #ff0000;
+    /* 【変更】ボタンっぽさを無くし、通信中を示す「ゆっくり点滅する小さな点」にしました */
+    .indicator-dot {
+      width: 6px;
+      height: 6px;
+      background-color: #ff0000;
       border-radius: 50%;
-      position: relative;
-      margin-bottom: 20px;
-      opacity: 0.8;
+      margin-bottom: 24px;
+      animation: blink 2.5s infinite ease-in-out;
     }
-    .reticle::after {
-      content: '';
-      position: absolute;
-      top: 50%; left: 50%;
-      width: 4px; height: 4px;
-      background: #ff0000;
-      border-radius: 50%;
-      transform: translate(-50%, -50%);
+
+    @keyframes blink {
+      0%, 100% { opacity: 0.1; }
+      50% { opacity: 1; }
     }
 
     #status { 
-      font-size: 14px; 
-      letter-spacing: 2px;
-      opacity: 0.6; /* 暗闇で眩しくないように少し透過させる */
+      font-size: 12px; 
+      letter-spacing: 4px;
     }
   </style>
 </head>
 <body>
 
-  <div id="instruction">
-    プラネタリウムの天井の中心に向けて、<br>STARTを押してください。
+  <div id="setupScreen">
+    <div id="instruction">
+      プラネタリウムの天井の<br>中心に向けて<br><br>STARTを押してください
+    </div>
+    <button id="startButton">START</button>
   </div>
-  <button id="startButton">START</button>
 
   <div id="activeScreen">
-    <div class="reticle"></div>
+    <div class="indicator-dot"></div>
     <div id="status">POINTER ACTIVE</div>
   </div>
 
@@ -102,11 +112,23 @@
     let isSending = false;
     let wakeLock = null; 
 
-    // 誤操作防止（JS側）
+    // --- 誤操作防止（JS側） ---
     document.addEventListener('contextmenu', event => event.preventDefault());
     document.addEventListener('touchmove', event => event.preventDefault(), { passive: false });
 
-    // スリープ防止機能
+    // 【追加】ダブルタップによるズームを強制的にブロックする処理
+    let lastTouchEnd = 0;
+    document.addEventListener('touchend', (event) => {
+      const now = (new Date()).getTime();
+      // 前回のタップから300ミリ秒以内（ダブルタップ）なら標準の動作をキャンセル
+      if (now - lastTouchEnd <= 300) {
+        event.preventDefault();
+      }
+      lastTouchEnd = now;
+    }, { passive: false });
+
+
+    // --- スリープ防止機能 ---
     async function requestWakeLock() {
       try {
         if ('wakeLock' in navigator) {
@@ -143,9 +165,8 @@
     });
 
     function startSensing() {
-      // 待機中のUIを消して、実行中のUIを表示する
-      document.getElementById('instruction').style.display = 'none';
-      document.getElementById('startButton').style.display = 'none';
+      // 画面の切り替え
+      document.getElementById('setupScreen').style.display = 'none';
       document.getElementById('activeScreen').style.display = 'flex';
       
       isSending = true;
