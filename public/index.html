@@ -8,20 +8,91 @@
   <style>
     /* --- 誤操作防止の強力なロック設定 --- */
     html, body {
-      overscroll-behavior: none; /* 「下に引っ張って更新」を禁止 */
-      touch-action: none;        /* スワイプやダブルタップなどのブラウザ標準アクションを禁止 */
-      user-select: none;         /* テキスト選択を禁止 */
-      -webkit-user-select: none; /* iOS Safari用のテキスト選択禁止 */
+      overscroll-behavior: none;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      
+      /* --- 暗闇用カラー設定 --- */
+      background-color: #000000; /* 真っ黒な背景 */
+      color: #ff0000;            /* 天体観測アプリ風のピュアレッド */
     }
     
-    body { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: sans-serif; background: #222; color: white;}
-    button { padding: 20px 40px; font-size: 24px; border-radius: 10px; background: #007bff; color: white; border: none; cursor: pointer; }
-    #status { margin-top: 20px; font-size: 18px; text-align: center; line-height: 1.5; }
+    body { 
+      display: flex; 
+      flex-direction: column; 
+      align-items: center; 
+      justify-content: center; 
+      height: 100vh; 
+      margin: 0; 
+      font-family: sans-serif; 
+    }
+
+    /* --- 待機中UI --- */
+    #instruction {
+      margin-bottom: 40px;
+      font-size: 18px;
+      text-align: center;
+      line-height: 1.8;
+      padding: 0 20px;
+    }
+
+    button { 
+      padding: 15px 50px; 
+      font-size: 24px; 
+      border-radius: 8px; 
+      background: transparent;   /* 背景を透明に */
+      color: #ff0000; 
+      border: 2px solid #ff0000; /* 赤い線のフチドリ */
+      cursor: pointer; 
+      letter-spacing: 2px;
+    }
+
+    /* --- 実行中UI（最初は隠しておく） --- */
+    #activeScreen {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    /* ポインター感を演出するシンプルな照準器 */
+    .reticle {
+      width: 50px;
+      height: 50px;
+      border: 1px solid #ff0000;
+      border-radius: 50%;
+      position: relative;
+      margin-bottom: 20px;
+      opacity: 0.8;
+    }
+    .reticle::after {
+      content: '';
+      position: absolute;
+      top: 50%; left: 50%;
+      width: 4px; height: 4px;
+      background: #ff0000;
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+    }
+
+    #status { 
+      font-size: 14px; 
+      letter-spacing: 2px;
+      opacity: 0.6; /* 暗闇で眩しくないように少し透過させる */
+    }
   </style>
 </head>
 <body>
+
+  <div id="instruction">
+    プラネタリウムの天井の中心に向けて、<br>STARTを押してください。
+  </div>
   <button id="startButton">START</button>
-  <div id="status">待機中...</div>
+
+  <div id="activeScreen">
+    <div class="reticle"></div>
+    <div id="status">POINTER ACTIVE</div>
+  </div>
 
   <script>
     const socket = io(); 
@@ -29,27 +100,23 @@
     
     let currentSensorData = { alpha: 0, beta: 0, gamma: 0 };
     let isSending = false;
-    let wakeLock = null; // スリープ防止用の変数
+    let wakeLock = null; 
 
-    // --- 誤操作防止（JS側） ---
-    // 長押しメニューを禁止
+    // 誤操作防止（JS側）
     document.addEventListener('contextmenu', event => event.preventDefault());
-    // スワイプによるスクロールを念押しで完全にブロック
     document.addEventListener('touchmove', event => event.preventDefault(), { passive: false });
 
-    // --- スリープ防止機能 (Wake Lock API) ---
+    // スリープ防止機能
     async function requestWakeLock() {
       try {
         if ('wakeLock' in navigator) {
           wakeLock = await navigator.wakeLock.request('screen');
-          console.log('スリープ防止が有効になりました');
         }
       } catch (err) {
         console.error('スリープ防止エラー:', err);
       }
     }
 
-    // スマホの画面を一旦閉じて戻ってきた時などに、スリープ防止を再設定する
     document.addEventListener('visibilitychange', async () => {
       if (wakeLock !== null && document.visibilityState === 'visible') {
         requestWakeLock();
@@ -57,7 +124,6 @@
     });
 
     document.getElementById('startButton').addEventListener('click', async () => {
-      // STARTボタンを押した瞬間にスリープ防止をリクエスト
       requestWakeLock();
 
       if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
@@ -77,8 +143,11 @@
     });
 
     function startSensing() {
+      // 待機中のUIを消して、実行中のUIを表示する
+      document.getElementById('instruction').style.display = 'none';
       document.getElementById('startButton').style.display = 'none';
-      document.getElementById('status').innerHTML = '送信中... ID: ' + clientId + '<br>（画面ロック＆スリープ防止有効）';
+      document.getElementById('activeScreen').style.display = 'flex';
+      
       isSending = true;
 
       window.addEventListener('deviceorientation', (event) => {
