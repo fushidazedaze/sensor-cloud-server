@@ -2,69 +2,155 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sensor Controller</title>
-  <script src="/socket.io/socket.io.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Planetarium Pointer</title>
   <style>
-    body { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: sans-serif; background: #222; color: white;}
-    button { padding: 20px 40px; font-size: 24px; border-radius: 10px; background: #007bff; color: white; border: none; cursor: pointer; }
-    #status { margin-top: 20px; font-size: 18px; }
+    /* 【防弾化2】ブラウザ特有の引っ張りアクションやスクロールをCSSレベルで封殺 */
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #111; /* プラネタリウムに合わせて暗く */
+      color: #fff;
+      font-family: sans-serif;
+      text-align: center;
+      overflow: hidden;
+      touch-action: none; /* ダブルタップズームなどを無効化 */
+      -webkit-user-select: none; /* テキスト選択禁止 */
+      user-select: none;
+    }
+    #ui-container {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    #startBtn {
+      background-color: #007AFF;
+      color: white;
+      border: none;
+      border-radius: 50px;
+      padding: 20px 40px;
+      font-size: 24px;
+      font-weight: bold;
+      box-shadow: 0 4px 15px rgba(0, 122, 255, 0.4);
+    }
+    #startBtn:active {
+      transform: scale(0.95);
+    }
+    #status {
+      margin-top: 30px;
+      font-size: 16px;
+      color: #aaa;
+      line-height: 1.5;
+    }
+    .hidden {
+      display: none !important;
+    }
   </style>
 </head>
 <body>
-  <button id="startButton">START</button>
-  <div id="status">待機中...</div>
+
+  <div id="ui-container">
+    <button id="startBtn">正面に向けてSTART</button>
+    <p id="status">スマホの先端をドームの正面に向け、<br>STARTを押してください。</p>
+  </div>
 
   <script>
-    const socket = io(); // サーバーに接続
-    // ランダムなクライアントIDを生成（Max側で識別するため）
-    const clientId = 'client_' + Math.random().toString(36).substr(2, 5); 
+    // ==========================================
+    // 1. 設定（※RenderのURLに書き換えてください！）
+    // ==========================================
+    // 例: 'wss://sensor-cloud-server.onrender.com' (httpsではなくwssになります)
+    const SERVER_URL = 'wss://sensor-cloud-server.onrender.com';
     
-    let currentSensorData = { alpha: 0, beta: 0, gamma: 0 };
-    let isSending = false;
+    // ==========================================
+    // 2. 変数の準備
+    // ==========================================
+    const socket = new WebSocket(SERVER_URL);
+    const clientId = 'client_' + Math.floor(Math.random() * 100000);
+    
+    let isCalibrated = false;
+    let baseAlpha = 0, baseBeta = 0, baseGamma = 0;
+    let lastSendTime = 0;
 
-    document.getElementById('startButton').addEventListener('click', async () => {
-      // iOS 13+ のためのセンサー許可リクエスト
-      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+    const startBtn = document.getElementById('startBtn');
+    const statusText = document.getElementById('status');
+
+    // 【防弾化3】JavaScriptレベルでもスクロールやスワイプを強制ブロック
+    document.addEventListener('touchmove', function(e) {
+      e.preventDefault();
+    }, { passive: false });
+
+    // ==========================================
+    // 3. STARTボタンを押した時の処理
+    // ==========================================
+    startBtn.addEventListener('click', async () => {
+      // iOS 13以降のセンサー許可リクエスト
+      if (typeof DeviceOrientationEvent.requestPermission === 'function') {
         try {
-          const permissionState = await DeviceOrientationEvent.requestPermission();
-          if (permissionState === 'granted') {
-            startSensing();
+          const permission = await DeviceOrientationEvent.requestPermission();
+          if (permission === 'granted') {
+            startSensor();
           } else {
-            alert('センサーの利用が許可されませんでした。');
+            alert('センサーへのアクセスが拒否されました。設定から許可してください。');
           }
         } catch (error) {
-          console.error(error);
+          alert('エラーが発生しました: ' + error);
         }
       } else {
-        // Android等、許可が不要な場合
-        startSensing();
+        // Androidなど許可不要の端末
+        startSensor();
       }
     });
 
-    function startSensing() {
-      document.getElementById('startButton').style.display = 'none';
-      document.getElementById('status').innerText = '送信中... ID: ' + clientId;
-      isSending = true;
+    // ==========================================
+    // 4. センサーの読み取りと送信（キャリブレーション処理）
+    // ==========================================
+    function startSensor() {
+      // 画面のUIを「送信中」に切り替える
+      startBtn.classList.add('hidden');
+      statusText.innerHTML = `<span style="color:#0f0; font-size:20px;">接続中...</span><br>ポインターとして使用できます`;
 
-      // センサーの値が更新されたら変数に保存するだけ（ここではまだ送らない）
       window.addEventListener('deviceorientation', (event) => {
-        currentSensorData.alpha = event.alpha || 0;
-        currentSensorData.beta = event.beta || 0;
-        currentSensorData.gamma = event.gamma || 0;
-      });
+        let alpha = event.alpha;
+        let beta = event.beta;
+        let gamma = event.gamma;
 
-      // 負荷対策: 33ミリ秒に1回（約30fps）のペースで最新の値を送信する
-      setInterval(() => {
-        if (isSending) {
-          socket.emit('sensor-data', {
-            id: clientId,
-            alpha: currentSensorData.alpha,
-            beta: currentSensorData.beta,
-            gamma: currentSensorData.gamma
-          });
+        if (alpha === null) return;
+
+        // 【キャリブレーション】STARTを押した直後の1回目のデータを「基準（ゼロ）」として記憶
+        if (!isCalibrated) {
+          baseAlpha = alpha;
+          baseBeta = beta;
+          baseGamma = gamma;
+          isCalibrated = true;
+          return;
         }
-      }, 33);
+
+        // 【OS差異の吸収】現在の角度から、基準の角度を引き算して「相対角度」にする
+        let relAlpha = alpha - baseAlpha;
+        let relBeta = beta - baseBeta;
+        let relGamma = gamma - baseGamma;
+
+        // 方角（Alpha）が0度と360度の境目をまたいだ時のバグを修正
+        if (relAlpha > 180) relAlpha -= 360;
+        if (relAlpha < -180) relAlpha += 360;
+
+        // 【通信の最適化】データを送りすぎないように30fps（約33ミリ秒に1回）に制限
+        let now = Date.now();
+        if (now - lastSendTime > 33) {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({
+              type: 'gyro',
+              clientId: clientId,
+              alpha: relAlpha, // 絶対角度ではなく、計算済みの相対角度を送る
+              beta: relBeta,
+              gamma: relGamma
+            }));
+            lastSendTime = now;
+          }
+        }
+      });
     }
   </script>
 </body>
