@@ -6,95 +6,52 @@
   <title>Sensor Controller</title>
   <script src="/socket.io/socket.io.js"></script>
   <style>
-    /* --- 誤操作防止の強力なロック設定 --- */
-    *, *::before, *::after {
-      touch-action: none; /* すべての要素でブラウザの標準タッチ操作を禁止 */
-    }
-    
+    *, *::before, *::after { touch-action: none; }
     html, body {
       overscroll-behavior: none;
       user-select: none;
       -webkit-user-select: none;
-      -webkit-touch-callout: none; /* iOSの長押しメニュー禁止 */
-      overflow: hidden;            /* スクロールを完全に禁止 */
-      
-      /* --- 暗闇用カラー設定 --- */
+      -webkit-touch-callout: none;
+      overflow: hidden;
       background-color: #000000;
       color: #ff0000;
     }
-    
     body { 
-      display: flex; 
-      flex-direction: column; 
-      align-items: center; 
-      justify-content: center; 
-      height: 100vh; 
-      margin: 0; 
-      font-family: sans-serif; 
+      display: flex; flex-direction: column; align-items: center; 
+      justify-content: center; height: 100vh; margin: 0; font-family: sans-serif; 
     }
-
-    /* --- 待機中UI --- */
     #setupScreen {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      opacity: 0.4; /* 【変更】最初のページ全体を暗くしました */
+      display: flex; flex-direction: column; align-items: center; opacity: 0.4;
     }
-
     #instruction {
-      margin-bottom: 40px;
-      font-size: 16px;
-      text-align: center;
-      line-height: 1.8;
-      padding: 0 20px;
-      letter-spacing: 1px;
+      margin-bottom: 40px; font-size: 16px; text-align: center; 
+      line-height: 1.8; padding: 0 20px; letter-spacing: 1px;
     }
-
     button { 
-      padding: 12px 40px; 
-      font-size: 20px; 
-      border-radius: 4px; 
-      background: transparent;
-      color: #ff0000; 
-      border: 1px solid #ff0000; /* 【変更】枠線を細くして主張を抑えました */
-      cursor: pointer; 
-      letter-spacing: 2px;
+      padding: 12px 40px; font-size: 20px; border-radius: 4px; 
+      background: transparent; color: #ff0000; border: 1px solid #ff0000; 
+      cursor: pointer; letter-spacing: 2px;
     }
-
-    /* --- 実行中UI --- */
     #activeScreen {
-      display: none;
-      flex-direction: column;
-      align-items: center;
-      opacity: 0.4; /* 【変更】実行中も暗く保つ */
+      display: none; flex-direction: column; align-items: center; opacity: 0.4;
     }
-
-    /* 【変更】ボタンっぽさを無くし、通信中を示す「ゆっくり点滅する小さな点」にしました */
     .indicator-dot {
-      width: 6px;
-      height: 6px;
-      background-color: #ff0000;
-      border-radius: 50%;
-      margin-bottom: 24px;
+      width: 6px; height: 6px; background-color: #ff0000; 
+      border-radius: 50%; margin-bottom: 24px;
       animation: blink 2.5s infinite ease-in-out;
     }
-
     @keyframes blink {
       0%, 100% { opacity: 0.1; }
       50% { opacity: 1; }
     }
-
-    #status { 
-      font-size: 12px; 
-      letter-spacing: 4px;
-    }
+    #status { font-size: 12px; letter-spacing: 4px; }
   </style>
 </head>
 <body>
 
   <div id="setupScreen">
     <div id="instruction">
-      プラネタリウムの天井の<br>中心に向けて<br><br>STARTを押してください
+      スマホを寝かせた状態で<br>正面の低い空に向けて<br><br>STARTを押してください
     </div>
     <button id="startButton">START</button>
   </div>
@@ -112,63 +69,41 @@
     let isSending = false;
     let wakeLock = null; 
 
-    // --- 誤操作防止（JS側） ---
     document.addEventListener('contextmenu', event => event.preventDefault());
     document.addEventListener('touchmove', event => event.preventDefault(), { passive: false });
 
-    // 【追加】ダブルタップによるズームを強制的にブロックする処理
     let lastTouchEnd = 0;
     document.addEventListener('touchend', (event) => {
       const now = (new Date()).getTime();
-      // 前回のタップから300ミリ秒以内（ダブルタップ）なら標準の動作をキャンセル
-      if (now - lastTouchEnd <= 300) {
-        event.preventDefault();
-      }
+      if (now - lastTouchEnd <= 300) event.preventDefault();
       lastTouchEnd = now;
     }, { passive: false });
 
-
-    // --- スリープ防止機能 ---
     async function requestWakeLock() {
-      try {
-        if ('wakeLock' in navigator) {
-          wakeLock = await navigator.wakeLock.request('screen');
-        }
-      } catch (err) {
-        console.error('スリープ防止エラー:', err);
-      }
+      try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } 
+      catch (err) { console.error(err); }
     }
 
     document.addEventListener('visibilitychange', async () => {
-      if (wakeLock !== null && document.visibilityState === 'visible') {
-        requestWakeLock();
-      }
+      if (wakeLock !== null && document.visibilityState === 'visible') requestWakeLock();
     });
 
     document.getElementById('startButton').addEventListener('click', async () => {
       requestWakeLock();
-
       if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
         try {
           const permissionState = await DeviceOrientationEvent.requestPermission();
-          if (permissionState === 'granted') {
-            startSensing();
-          } else {
-            alert('センサーの利用が許可されませんでした。');
-          }
-        } catch (error) {
-          console.error(error);
-        }
+          if (permissionState === 'granted') startSensing();
+          else alert('センサーの利用が許可されませんでした。');
+        } catch (error) { console.error(error); }
       } else {
         startSensing();
       }
     });
 
     function startSensing() {
-      // 画面の切り替え
       document.getElementById('setupScreen').style.display = 'none';
       document.getElementById('activeScreen').style.display = 'flex';
-      
       isSending = true;
 
       window.addEventListener('deviceorientation', (event) => {
